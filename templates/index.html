@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Chess AI - Select Mode</title>
+</head>
+<body>
+    <h1>Welcome to Simple Chess AI</h1>
+    <form method="POST">
+        <label>Select Game Mode:</label><br><br>
+
+        <input type="radio" name="mode" value="pvp" required> Player vs Player <br>
+        <input type="radio" name="mode" value="pvb"> Player vs Bot <br>
+        <input type="radio" name="mode" value="bvb"> Bot vs Bot <br><br>
+
+        <div id="color-select" style="display:none;">
+            <label>Choose Side (for Player vs Bot):</label><br>
+            <input type="radio" name="color" value="white" checked> White <br>
+            <input type="radio" name="color" value="black"> Black <br><br>
+        </div>
+
+        <button type="submit">Start Game</button>
+    </form>
+
+    <script>
+        const modeInputs = document.querySelectorAll('input[name="mode"]');
+        const colorSelect = document.getElementById("color-select");
+
+        modeInputs.forEach(input => {
+            input.addEventListener('change', () => {
+                if(input.value === "pvb") {
+                    colorSelect.style.display = "block";
+                } else {
+                    colorSelect.style.display = "none";
+                }
+            });
+        });
+    </script>
+</body>
+</html>

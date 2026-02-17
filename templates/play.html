@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chess Game</title>
+</head>
+<body>
+
+    <h2>Game Mode: {{ game_mode.upper() }}</h2>
+    <h3>Turn: {{ turn }}</h3>
+
+    <pre>{{ board }}</pre>
+
+    <p style="color:red;">{{ message }}</p>
+
+    <!-- ========================= -->
+    <!-- PVP + PVB Move Input -->
+    <!-- ========================= -->
+    {% if not game_over and (
+        game_mode == "pvp"
+        or (game_mode == "pvb" and
+            ((player_color == "white" and turn == "White")
+             or (player_color == "black" and turn == "Black")))
+    ) %}
+    <form method="POST">
+        <label>Enter move (UCI, e.g., e2e4):</label><br>
+        <input type="text" name="move" required>
+        <button type="submit">Submit</button>
+    </form>
+    {% endif %}
+
+    <!-- ========================= -->
+    <!-- BVB Next Move Button -->
+    <!-- ========================= -->
+    {% if game_mode == "bvb" and not game_over %}
+    <form method="POST">
+        <button type="submit" name="move" value="next_ai">
+            Next AI Move
+        </button>
+    </form>
+    {% endif %}
+
+    <!-- ========================= -->
+    <!-- Reset Button -->
+    <!-- ========================= -->
+    <form method="POST">
+        <button type="submit" name="move" value="reset">
+            Reset Game
+        </button>
+    </form>
+
+    <br><br>
+    <a href="/">Back to Mode Selection</a>
+
+</body>
+</html>
