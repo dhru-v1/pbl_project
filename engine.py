@@ -1,101 +1,153 @@
 import chess
 
-def bestmove_for_black(board):
-    bestmove = None
-    depth = 1
-    while depth <= 4:  # Maximum depth
-        bestscore = -9999
-        alpha = -9999
-        beta = 9999
-        for move in order_moves(board):
-            temp_board = board.copy()
-            temp_board.push(move)
-            score = minimax(temp_board, depth - 1, alpha, beta, False)
-            if score > bestscore:
-                bestscore = score
-                bestmove = move
-            alpha = max(alpha, bestscore)
-        depth += 1
-    return bestmove
+# =========================
+# CONSTANTS & EVALUATION
+# =========================
 
+PIECE_VALUES = {
+    chess.PAWN: 1,
+    chess.KNIGHT: 3,
+    chess.BISHOP: 3,
+    chess.ROOK: 5,
+    chess.QUEEN: 9,
+    chess.KING: 0
+}
+
+# =========================
+# APP.PY WRAPPERS
+# =========================
+
+# We keep these functions so your Flask app doesn't break, 
+# but route them to the unified Negamax search.
 def bestmove_for_white(board):
-    bestmove = None
-    depth = 1
-    while depth <= 4:  # Maximum depth
-        bestscore = -9999
-        alpha = -9999
-        beta = 9999
-        for move in order_moves(board):
-            temp_board = board.copy()
-            temp_board.push(move)
-            score = minimax(temp_board, depth - 1, alpha, beta, True)
-            if score > bestscore:   
-                bestscore = score
-                bestmove = move
-            alpha = max(alpha, bestscore)
-        depth += 1
-    return bestmove
+    return get_best_move(board, depth=4)
+
+def bestmove_for_black(board):
+    return get_best_move(board, depth=4)
+
+# =========================
+# NEGAMAX SEARCH (UNIFIED)
+# =========================
+
+def get_best_move(board, depth):
+    best_move = None
+    max_eval = -99999
+    alpha = -99999
+    beta = 99999
+
+    for move in order_moves(board):
+        board.push(move)
+        # Negamax recursive call flips the alpha/beta and negates the result
+        eval = -negamax(board, depth - 1, -beta, -alpha)
+        board.pop()
+
+        if eval > max_eval:
+            max_eval = eval
+            best_move = move
+
+        alpha = max(alpha, eval)
+
+    # Fallback safety in case the engine is cornered
+    if best_move is None:
+        try:
+            best_move = list(board.legal_moves)[0]
+        except IndexError:
+            pass
+
+    return best_move
 
 
-def minimax(board, depth, alpha, beta, maximizing):
+def negamax(board, depth, alpha, beta):
     if depth == 0 or board.is_game_over():
         return evaluate_board(board)
 
-    if maximizing:
-        bestscore = -9999
-        for move in order_moves(board):
-            board.push(move)
-            score = minimax(board, depth - 1, alpha, beta, False)
-            board.pop()
-            bestscore = max(score, bestscore)
-            alpha = max(alpha, bestscore)
-            if beta <= alpha:
-                break
-        return bestscore
-    else:
-        bestscore = 9999
-        for move in order_moves(board):
-            board.push(move)
-            score = minimax(board, depth - 1, alpha, beta, True)
-            board.pop()
-            bestscore = min(score, bestscore)
-            beta = min(beta, bestscore)
-            if beta <= alpha:
-                break
-        return bestscore
+    max_eval = -99999
+    for move in order_moves(board):
+        board.push(move)
+        eval = -negamax(board, depth - 1, -beta, -alpha)
+        board.pop()
+
+        max_eval = max(max_eval, eval)
+        alpha = max(alpha, eval)
+
+        # Alpha-beta cutoff
+        if alpha >= beta:
+            break 
+
+    return max_eval
+
+# =========================
+# MOVE ORDERING (MVV-LVA)
+# =========================
+
+def get_move_score(board, move):
+    score = 0
+    if board.is_capture(move):
+        # MVV-LVA: Most Valuable Victim - Least Valuable Attacker
+        if board.is_en_passant(move):
+            return 105 
+        
+        victim = board.piece_at(move.to_square)
+        attacker = board.piece_at(move.from_square)
+        
+        if victim and attacker:
+            victim_val = PIECE_VALUES.get(victim.piece_type, 0)
+            attacker_val = PIECE_VALUES.get(attacker.piece_type, 0)
+            # Prioritizes moves like Pawn taking Queen over Queen taking Pawn
+            score = 100 + victim_val * 10 - attacker_val
+    return score
 
 def order_moves(board):
     moves = list(board.legal_moves)
-    moves.sort(key=lambda move: board.is_capture(move), reverse=True)
+    moves.sort(key=lambda m: get_move_score(board, m), reverse=True)
     return moves
+
+# =========================
+# EVALUATION FUNCTION
+# =========================
 
 def evaluate_board(board):
     if board.is_checkmate():
-        if board.turn == chess.WHITE:
-            return -9999  
-        else:
-            return 9999
+        # In Negamax, returning a highly negative number means the CURRENT player to move lost
+        return -99999
+    
     if board.is_stalemate() or board.is_insufficient_material():
-        return 0 
-
-    piece_values = {
-        chess.PAWN: 1,
-        chess.KNIGHT: 3,
-        chess.BISHOP: 3,
-        chess.ROOK: 5,
-        chess.QUEEN: 9,
-        chess.KING: 0 
-    }
+        return 0
 
     score = 0
-    for piece_type in piece_values:
-        score += len(board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
-        score -= len(board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
 
+    # Material Calculation
+    for piece_type, value in PIECE_VALUES.items():
+        score += len(board.pieces(piece_type, chess.WHITE)) * value
+        score -= len(board.pieces(piece_type, chess.BLACK)) * value
+
+    # Mobility Calculation (Patched Null Move Bug)
     mobility_bonus = 0.1
-    score += len(list(board.legal_moves)) * mobility_bonus
+    white_moves = 0
+    black_moves = 0
 
-    return score
+    if board.turn == chess.WHITE:
+        white_moves = len(list(board.legal_moves))
+        if not board.is_check():
+            board.push(chess.Move.null())
+            black_moves = len(list(board.legal_moves))
+            board.pop()
+    else:
+        black_moves = len(list(board.legal_moves))
+        if not board.is_check():
+            board.push(chess.Move.null())
+            white_moves = len(list(board.legal_moves))
+            board.pop()
+
+    score += (white_moves - black_moves) * mobility_bonus
+
+    # Negamax requires the evaluation to be from the perspective of the side whose turn it is
+    perspective = 1 if board.turn == chess.WHITE else -1
+    return score * perspective
+
+# =========================
+# CLI (UNCHANGED)
+# =========================
 
 def get_move(board):
     while True:
@@ -111,7 +163,6 @@ def get_move(board):
                 return move_input
             print("Invalid format. Use UCI like e2e4 or g7g8q.")
 
-
 def pvp():
     board = chess.Board()
 
@@ -125,8 +176,9 @@ def pvp():
 
         move = get_move(board)
 
-        if move=="quit":
+        if move == "quit":
             break
+
         board.push(move)
 
         if board.is_check():
@@ -137,12 +189,10 @@ def pvp():
 
     if board.is_game_over():
         reason = board.outcome().termination
-
         print(f"{player} won")
         print("Reason:", reason)
     else:
         print(f"{player} resigned")
-
 
 def pvb():
     pass
@@ -152,20 +202,19 @@ def bvb():
 
     while not board.is_game_over():
         print(board)
+
         if board.turn == chess.WHITE:
-            print("White's turn")
-            move = bestmove_for_black(board)
-            
+            move = bestmove_for_white(board)
         else:
-            print("Black's turn")
             move = bestmove_for_black(board)
-        
+
         board.push(move)
         print(f"AI plays: {move.uci()}")
-    
+
     print(board)
     print("Game over!")
-    print("Result: " + board.result())
+    print("Result:", board.result())
+
 
 if __name__ == "__main__":
     pass

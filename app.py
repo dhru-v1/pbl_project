@@ -2,11 +2,43 @@ from flask import Flask, render_template, request, redirect, url_for
 import chess
 from engine import bestmove_for_black, bestmove_for_white
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="images", static_url_path="/images")
 
 board = chess.Board()
 game_mode = None
 player_color = "white"
+
+
+def get_board_grid(board):
+    grid = []
+    for rank in range(8, 0, -1):
+        row = []
+        for file in range(1, 9):
+            square = chess.square(file - 1, rank - 1)
+            piece = board.piece_at(square)
+            piece_img = None
+            symbol = None
+            if piece:
+                symbol = piece.symbol()
+                color = "white" if symbol.isupper() else "black"
+                piece_map = {
+                    chess.PAWN: "pawn",
+                    chess.KNIGHT: "knight",
+                    chess.BISHOP: "bishop",
+                    chess.ROOK: "rook",
+                    chess.QUEEN: "queen",
+                    chess.KING: "king",
+                }
+                filename = f"{color}_{piece_map[piece.piece_type]}.png"
+                piece_img = url_for("static", filename=filename)
+
+            row.append({
+                "square_name": chess.square_name(square),
+                "piece_img": piece_img,
+                "piece": symbol or "",
+            })
+        grid.append(row)
+    return grid
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -30,19 +62,13 @@ def play():
     global board, game_mode, player_color
 
     message = ""
-
-    # ======================
-    # HANDLE POST REQUESTS
-    # ======================
     if request.method == "POST":
         move_input = request.form.get("move")
 
-        # Reset
         if move_input == "reset":
             board = chess.Board()
             return redirect(url_for("play"))
 
-        # BVB - manual next move
         if move_input == "next_ai":
             if game_mode == "bvb" and not board.is_game_over():
 
@@ -56,14 +82,12 @@ def play():
 
             return redirect(url_for("play"))
 
-        # PVP and PVB player move
         try:
             move = chess.Move.from_uci(move_input)
 
             if move in board.legal_moves:
                 board.push(move)
 
-                # Player vs Bot response
                 if game_mode == "pvb" and not board.is_game_over():
                     if (player_color == "white" and board.turn == chess.BLACK) or \
                        (player_color == "black" and board.turn == chess.WHITE):
@@ -82,9 +106,6 @@ def play():
         except Exception:
             message = "Invalid move. Use UCI like e2e4."
 
-    # ======================
-    # GAME STATUS
-    # ======================
     turn = "White" if board.turn == chess.WHITE else "Black"
 
     if board.is_game_over():
@@ -97,10 +118,11 @@ def play():
             message = "Game over!"
 
     game_over = board.is_game_over()
+    board_grid = get_board_grid(board)
 
     return render_template(
         "play.html",
-        board=str(board),
+        board_grid=board_grid,
         turn=turn,
         message=message,
         game_mode=game_mode,
