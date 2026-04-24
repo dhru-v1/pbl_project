@@ -1,97 +1,440 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>Chess Game</title>
     <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
         .board-container {
+            position: relative;
             width: 640px;
             height: 640px;
-            margin: 24px auto;
-            background: url("{{ url_for('static', filename='chess_board3.png') }}") no-repeat center center;
+            background: url("/images/chess_board3.png") no-repeat center center;
             background-size: contain;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 4px;
         }
-        .board-table {
-            border-collapse: collapse;
-            width: 100%;
-            height: 100%;
+
+        .square {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            box-sizing: border-box;
         }
-        .board-cell {
-            width: 12.5%;
-            height: 12.5%;
-            text-align: center;
-            vertical-align: middle;
+
+        .square.highlight {
+            background-color: rgba(255, 0, 0, 0.4);
         }
-        .board-cell img {
-            max-width: 80%;
-            max-height: 80%;
-            display: inline-block;
+        
+        .square.last-move {
+            background-color: rgba(155, 199, 0, 0.41);
         }
-        .game-info {
-            text-align: center;
+        
+        .square.valid-target {
+            background-color: rgba(20, 85, 30, 0.5);
+            border-radius: 50%;
+            transform: scale(0.3);
+            pointer-events: none;
         }
+
+        .piece {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            cursor: grab;
+            transition: left 0.25s ease-in-out, top 0.25s ease-in-out;
+            z-index: 10;
+        }
+
+        .piece:active {
+            cursor: grabbing;
+            z-index: 20;
+        }
+
+        .controls {
+            margin-top: 30px;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        .btn-secondary {
+            background-color: #555;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #444;
+        }
+
         .message {
-            color: red;
-            text-align: center;
+            margin-top: 15px;
+            font-size: 1.2rem;
+            color: #ff6b6b;
+            font-weight: bold;
+            min-height: 24px;
+        }
+        
+        .status {
+            font-size: 1.1rem;
+            color: #aaa;
         }
     </style>
 </head>
 <body>
 
-    <div class="game-info">
-        <h2>Game Mode: {{ game_mode.upper() }}</h2>
-        <h3>Turn: {{ turn }}</h3>
+    <div class="header">
+        <h2>Game Mode: <span id="game-mode-display"></span></h2>
+        <div class="status" id="status-display">Turn: White</div>
+        <div class="message" id="message-display"></div>
     </div>
 
-    <div class="board-container">
-        <table class="board-table">
-            {% for row in board_grid %}
-            <tr>
-                {% for square in row %}
-                <td class="board-cell">
-                    {% if square.piece_img %}
-                        <img src="{{ square.piece_img }}" alt="{{ square.piece }}" />
-                    {% endif %}
-                </td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
-        </table>
+    <div class="board-container" id="board">
+        <!-- Squares and Pieces will be injected by JS -->
     </div>
 
-    <p class="message">{{ message }}</p>
+    <div class="controls">
+        <button id="btn-reset">Reset Game</button>
+        <button class="btn-secondary" onclick="window.location.href='/'">Back to Menu</button>
+    </div>
 
-    <!-- ========================= -->
-    <!-- PVP + PVB Move Input -->
-    <!-- ========================= -->
-    {% if not game_over and (
-        game_mode == "pvp"
-        or (game_mode == "pvb" and
-            ((player_color == "white" and turn == "White")
-             or (player_color == "black" and turn == "Black")))
-    ) %}
-    <form method="POST">
-        <label>Enter move (UCI, e.g., e2e4):</label><br>
-        <input type="text" name="move" required>
-        <button type="submit">Submit</button>
-    </form>
-    {% endif %}
+    <script>
+        const boardEl = document.getElementById('board');
+        let gameState = {
+            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            turn: "white",
+            game_over: false,
+            message: "",
+            in_check: false,
+            legal_moves: [],
+            game_mode: "{{ game_mode }}",
+            player_color: "{{ player_color }}",
+            last_move: null,
+            last_move_capture: false
+        };
 
-    {% if game_mode == "bvb" and not game_over %}
-    <form method="POST">
-        <button type="submit" name="move" value="next_ai">
-            Next AI Move
-        </button>
-    </form>
-    {% endif %}
+        const pieceMap = {
+            'p': 'black_pawn.png', 'n': 'black_knight.png', 'b': 'black_bishop.png', 'r': 'black_rook.png', 'q': 'black_queen.png', 'k': 'black_king.png',
+            'P': 'white_pawn.png', 'N': 'white_knight.png', 'B': 'white_bishop.png', 'R': 'white_rook.png', 'Q': 'white_queen.png', 'K': 'white_king.png'
+        };
 
-    <form method="POST">
-        <button type="submit" name="move" value="reset">
-            Reset Game
-        </button>
-    </form>
+        let isFlipped = gameState.player_color === 'black' && gameState.game_mode === 'pvb';
+        let draggedPiece = null;
+        let isBotThinking = false;
+        let initialFetchDone = false;
 
-    <br><br>
-    <a href="/">Back to Mode Selection</a>
+        function initBoard() {
+            boardEl.innerHTML = '';
+            for (let file = 0; file < 8; file++) {
+                for (let rank = 0; rank < 8; rank++) {
+                    const squareEl = document.createElement('div');
+                    squareEl.className = 'square';
+                    const sqName = getSquareName(file, rank);
+                    squareEl.id = 'sq-' + sqName;
+                    
+                    const pos = getPixels(file, rank);
+                    squareEl.style.left = pos.x + 'px';
+                    squareEl.style.top = pos.y + 'px';
+                    
+                    squareEl.addEventListener('dragover', e => {
+                        e.preventDefault();
+                    });
+                    
+                    squareEl.addEventListener('drop', e => handleDrop(e, sqName));
+                    
+                    boardEl.appendChild(squareEl);
+                }
+            }
+        }
 
+        function getSquareName(file, rank) {
+            return String.fromCharCode('a'.charCodeAt(0) + file) + (rank + 1);
+        }
+
+        function getPixels(file, rank) {
+            if (isFlipped) {
+                return { x: (7 - file) * 80, y: rank * 80 };
+            }
+            return { x: file * 80, y: (7 - rank) * 80 };
+        }
+        
+        function fileRankFromSq(sq) {
+            return {
+                file: sq.charCodeAt(0) - 'a'.charCodeAt(0),
+                rank: parseInt(sq[1]) - 1
+            };
+        }
+
+        function renderPieces() {
+            document.querySelectorAll('.piece').forEach(p => p.remove());
+            
+            const rows = gameState.fen.split(' ')[0].split('/');
+            for (let r = 0; r < 8; r++) {
+                let file = 0;
+                let rank = 7 - r;
+                for (let c = 0; c < rows[r].length; c++) {
+                    let char = rows[r][c];
+                    if (!isNaN(char)) {
+                        file += parseInt(char);
+                    } else {
+                        createPiece(char, file, rank);
+                        file++;
+                    }
+                }
+            }
+            updateHighlights();
+        }
+
+        function createPiece(char, file, rank) {
+            const pieceEl = document.createElement('img');
+            pieceEl.src = '/images/' + pieceMap[char];
+            pieceEl.className = 'piece';
+            pieceEl.id = `piece-${getSquareName(file, rank)}`;
+            pieceEl.draggable = true;
+            pieceEl.dataset.sq = getSquareName(file, rank);
+            pieceEl.dataset.piece = char;
+            
+            const pos = getPixels(file, rank);
+            pieceEl.style.left = pos.x + 'px';
+            pieceEl.style.top = pos.y + 'px';
+            
+            pieceEl.addEventListener('dragstart', handleDragStart);
+            pieceEl.addEventListener('dragend', handleDragEnd);
+            
+            // Allow drop on pieces too (capturing)
+            pieceEl.addEventListener('dragover', e => e.preventDefault());
+            pieceEl.addEventListener('drop', e => {
+                // Forward the drop to the square beneath it
+                handleDrop(e, pieceEl.dataset.sq);
+            });
+            
+            boardEl.appendChild(pieceEl);
+        }
+
+        function handleDragStart(e) {
+            if (gameState.game_over || isBotThinking) {
+                e.preventDefault();
+                return;
+            }
+            if (gameState.game_mode === 'pvb' && gameState.turn !== gameState.player_color) {
+                e.preventDefault();
+                return;
+            }
+            if (gameState.game_mode === 'bvb') {
+                e.preventDefault();
+                return;
+            }
+            
+            const isWhitePiece = e.target.dataset.piece === e.target.dataset.piece.toUpperCase();
+            if ((gameState.turn === 'white' && !isWhitePiece) || (gameState.turn === 'black' && isWhitePiece)) {
+                e.preventDefault();
+                return;
+            }
+
+            draggedPiece = e.target;
+            e.dataTransfer.setData('text/plain', e.target.dataset.sq);
+            e.target.style.opacity = '0.5';
+            
+            // Highlight valid moves
+            const sq = e.target.dataset.sq;
+            gameState.legal_moves.forEach(m => {
+                if (m.startsWith(sq)) {
+                    const targetSq = m.substring(2, 4);
+                    const indicator = document.createElement('div');
+                    indicator.className = 'square valid-target';
+                    indicator.id = 'target-' + targetSq;
+                    const coords = fileRankFromSq(targetSq);
+                    const pos = getPixels(coords.file, coords.rank);
+                    indicator.style.left = pos.x + 'px';
+                    indicator.style.top = pos.y + 'px';
+                    boardEl.appendChild(indicator);
+                }
+            });
+        }
+
+        function handleDragEnd(e) {
+            e.target.style.opacity = '1';
+            draggedPiece = null;
+            document.querySelectorAll('.valid-target').forEach(e => e.remove());
+        }
+
+        function handleDrop(e, targetSq) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!draggedPiece) return;
+            const sourceSq = draggedPiece.dataset.sq;
+            
+            let move = sourceSq + targetSq;
+            
+            const pieceChar = draggedPiece.dataset.piece;
+            const targetRank = parseInt(targetSq[1]);
+            if ((pieceChar === 'P' && targetRank === 8) || (pieceChar === 'p' && targetRank === 1)) {
+                move += 'q'; 
+            }
+
+            if (gameState.legal_moves.includes(move)) {
+                const coords = fileRankFromSq(targetSq);
+                const pos = getPixels(coords.file, coords.rank);
+                draggedPiece.style.left = pos.x + 'px';
+                draggedPiece.style.top = pos.y + 'px';
+                
+                sendMove(move);
+            }
+        }
+
+        function updateHighlights() {
+            document.querySelectorAll('.square.highlight, .square.last-move').forEach(el => {
+                el.classList.remove('highlight', 'last-move');
+            });
+            
+            if (gameState.last_move) {
+                const fromSq = gameState.last_move.substring(0, 2);
+                const toSq = gameState.last_move.substring(2, 4);
+                const fromEl = document.getElementById('sq-' + fromSq);
+                const toEl = document.getElementById('sq-' + toSq);
+                if (fromEl) fromEl.classList.add('last-move');
+                if (toEl) toEl.classList.add('last-move');
+            }
+            
+            if (gameState.in_check) {
+                const kingChar = gameState.turn === 'white' ? 'K' : 'k';
+                const kingPiece = document.querySelector(`.piece[data-piece="${kingChar}"]`);
+                if (kingPiece) {
+                    const sqEl = document.getElementById('sq-' + kingPiece.dataset.sq);
+                    if (sqEl) sqEl.classList.add('highlight');
+                }
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('game-mode-display').textContent = gameState.game_mode.toUpperCase();
+            document.getElementById('status-display').textContent = `Turn: ${gameState.turn.charAt(0).toUpperCase() + gameState.turn.slice(1)}`;
+            document.getElementById('message-display').textContent = gameState.message;
+            
+            isFlipped = gameState.player_color === 'black' && gameState.game_mode === 'pvb';
+            initBoard(); // Re-init board in case it flipped
+            renderPieces();
+            
+            if (gameState.last_move && initialFetchDone) {
+                playMoveSound(gameState.last_move_capture);
+            }
+            
+            initialFetchDone = true;
+            checkBotMove();
+        }
+
+        async function fetchState() {
+            const res = await fetch('/api/state');
+            gameState = await res.json();
+            updateUI();
+        }
+
+        async function sendMove(moveUci) {
+            const res = await fetch('/api/move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({move: moveUci})
+            });
+            const data = await res.json();
+            if (data.success) {
+                gameState = data.state;
+                updateUI();
+            } else {
+                fetchState(); 
+            }
+        }
+
+        async function doBotMove() {
+            if (gameState.game_over) return;
+            isBotThinking = true;
+            document.getElementById('status-display').textContent = `Bot is thinking...`;
+            
+            const res = await fetch('/api/bot_move', {method: 'POST'});
+            const data = await res.json();
+            isBotThinking = false;
+            
+            if (data.success) {
+                gameState = data.state;
+                updateUI();
+            }
+        }
+
+        function checkBotMove() {
+            if (gameState.game_over) return;
+            if (gameState.game_mode === 'bvb') {
+                setTimeout(doBotMove, 800);
+            } else if (gameState.game_mode === 'pvb' && gameState.turn !== gameState.player_color) {
+                setTimeout(doBotMove, 400);
+            }
+        }
+
+        document.getElementById('btn-reset').addEventListener('click', async () => {
+            const res = await fetch('/api/reset', {method: 'POST'});
+            const data = await res.json();
+            gameState = data.state;
+            updateUI();
+        });
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playMoveSound(isCapture) {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            if (isCapture) {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            } else {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            }
+        }
+
+        // Setup
+        fetchState();
+    </script>
 </body>
 </html>
